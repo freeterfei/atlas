@@ -207,179 +207,162 @@
  *
  */
 
-package com.taobao.android.builder.tasks.transform;
+package com.taobao.android.builder.tools.proguard;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.function.Supplier;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 
-import com.android.annotations.NonNull;
-import com.android.build.api.transform.JarInput;
-import com.android.build.api.transform.TransformException;
-import com.android.build.api.transform.TransformInput;
-import com.android.build.api.transform.TransformInvocation;
-import com.android.build.gradle.internal.api.AppVariantContext;
-import com.android.build.gradle.internal.scope.VariantScope;
-import com.android.build.gradle.internal.transforms.BaseProguardAction;
-import com.android.build.gradle.internal.transforms.ProGuardTransform;
-import com.android.build.gradle.internal.transforms.ProguardConfigurable;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
-import com.taobao.android.builder.extension.TBuildConfig;
-import com.taobao.android.builder.tools.ReflectUtils;
-import com.taobao.android.builder.tools.proguard.AtlasProguardHelper;
-import com.taobao.android.builder.tools.proguard.KeepOnlyConfigurationParser;
-import org.gradle.api.GradleException;
-import proguard.Configuration;
-import proguard.ParseException;
+import com.taobao.android.builder.tools.proguard.dto.RefClazz;
+import org.jetbrains.annotations.NotNull;
+import proguard.classfile.Clazz;
+import proguard.classfile.LibraryClass;
+import proguard.classfile.ProgramClass;
+import proguard.classfile.constant.ClassConstant;
+import proguard.classfile.constant.DoubleConstant;
+import proguard.classfile.constant.FieldrefConstant;
+import proguard.classfile.constant.FloatConstant;
+import proguard.classfile.constant.IntegerConstant;
+import proguard.classfile.constant.InterfaceMethodrefConstant;
+import proguard.classfile.constant.InvokeDynamicConstant;
+import proguard.classfile.constant.LongConstant;
+import proguard.classfile.constant.MethodHandleConstant;
+import proguard.classfile.constant.MethodTypeConstant;
+import proguard.classfile.constant.MethodrefConstant;
+import proguard.classfile.constant.NameAndTypeConstant;
+import proguard.classfile.constant.StringConstant;
+import proguard.classfile.constant.Utf8Constant;
+import proguard.classfile.constant.visitor.ConstantVisitor;
+import proguard.classfile.visitor.ClassVisitor;
 
 /**
- * Created by wuzhong on 2017/4/25.
+ * Created by wuzhong on 2017/5/12.
  */
-public class AtlasProguardTransform extends ProGuardTransform {
+public class ClassRefPrinter implements ClassVisitor, ConstantVisitor {
 
-    public AppVariantContext appVariantContext;
-    public ProGuardTransform oldTransform;
+    private Map<String, RefClazz> refClazzMap = new HashMap<>();
 
-    private TBuildConfig buildConfig;
+    private Set<String> mainDexClazzList;
 
-    List<File> defaultProguardFiles = new ArrayList<>();
-
-    public AtlasProguardTransform(AppVariantContext appVariantContext, BaseVariantOutputData baseVariantOutputData) {
-        super(appVariantContext.getScope(), false);
-        this.appVariantContext = appVariantContext;
-        defaultProguardFiles.addAll(
-            appVariantContext.getVariantConfiguration().getProguardFiles(false, new ArrayList<>()));
-
-        this.buildConfig = appVariantContext.getAtlasExtension().getTBuildConfig();
-    }
-
-    public AtlasProguardTransform(VariantScope variantScope, boolean asJar) {
-        super(variantScope, asJar);
+    public ClassRefPrinter(Set<String> mainDexClazzList) {
+        this.mainDexClazzList = mainDexClazzList;
     }
 
     @Override
-    public void transform(TransformInvocation invocation) throws TransformException {
-
-        if (appVariantContext.getAtlasExtension().getTBuildConfig().isFastProguard()){
-            fastTransform(invocation);
-            return;
-        }
-
-        try {
-
-            List oldConfigList = (List)ReflectUtils.getField(ProguardConfigurable.class, oldTransform,
-                                                             "configurationFiles");
-
-            List configList = (List)ReflectUtils.getField(ProguardConfigurable.class, this, "configurationFiles");
-
-            configList.addAll(oldConfigList);
-
-            Configuration configuration = (Configuration)ReflectUtils.getField(BaseProguardAction.class,
-                                                                               oldTransform, "configuration");
-            if (null == this.configuration.keep) {
-                this.configuration.keep = new ArrayList();
-            }
-            if (null != configuration.keep) {
-                this.configuration.keep.addAll(configuration.keep);
-            }
-
-        } catch (Exception e) {
-            throw new GradleException(e.getMessage(), e);
-        }
-
-        //apply bundle Inout
-        AtlasProguardHelper.applyBundleInOutConfigration(appVariantContext, this);
-
-        //apply bundle's configuration, 做开关控制
-        if (buildConfig.isBundleProguardConfigEnabled()) {
-            AtlasProguardHelper.applyBundleProguardConfigration(appVariantContext, this);
-        }
-
-        //apply mapping
-        AtlasProguardHelper.applyMapping(appVariantContext, this);
-
-        //set output
-        File proguardOutFile = new File(appVariantContext.getProject().getBuildDir(), "outputs/proguard.cfg");
-        this.printconfiguration(proguardOutFile);
-
-        super.transform(invocation);
-    }
-
-    public void fastTransform(TransformInvocation invocation) throws TransformException {
-
-        try {
-
-            List<File> mainJars = new ArrayList<>();
-            for (TransformInput transformInput : invocation.getInputs()){
-                for (JarInput jarInput : transformInput.getJarInputs()){
-                    mainJars.add(jarInput.getFile());
-                }
-            }
-            //先做bundle的并发proguard，cache优先
-            AtlasProguardHelper.doBundleProguard(appVariantContext, mainJars);
-
-            //apply bundle Inout
-            AtlasProguardHelper.applyBundleKeepsV2(appVariantContext, this);
-
-            //apply mapping TODO ，不混淆，没有效果的
-            AtlasProguardHelper.applyMapping(appVariantContext, this);
-
-            List oldConfigList = (List)ReflectUtils.getField(ProguardConfigurable.class, oldTransform,
-                                                             "configurationFiles");
-
-            List configList = (List)ReflectUtils.getField(ProguardConfigurable.class, this, "configurationFiles");
-
-            configList.addAll(oldConfigList);
-
-            Configuration configuration = (Configuration)ReflectUtils.getField(BaseProguardAction.class,
-                                                                               oldTransform, "configuration");
-            if (null == this.configuration.keep) {
-                this.configuration.keep = new ArrayList();
-            }
-            if (null != configuration.keep) {
-                this.configuration.keep.addAll(configuration.keep);
-            }
-
-            //set output
-            File proguardOutFile = new File(appVariantContext.getProject().getBuildDir(), "outputs/proguard.cfg");
-            this.printconfiguration(proguardOutFile);
-
-            super.transform(invocation);
-
-        } catch (Exception e) {
-            throw new GradleException(e.getMessage(), e);
-        }
-    }
-
-
-    //TODO include bundles's configuration
-    @Override
-    public void setConfigurationFiles(Supplier<Collection<File>> configFiles) {
-        super.setConfigurationFiles(configFiles);
+    public void visitProgramClass(ProgramClass programClass) {
+        programClass.constantPoolEntriesAccept(this);
     }
 
     @Override
-    public void applyConfigurationFile(File file) throws IOException, ParseException {
-        //appVariantContext.getVariantConfiguration().getProguardFiles(false, new ArrayList<>());
-        if (!defaultProguardFiles.contains(file) && buildConfig.isLibraryProguardKeepOnly()) {
-            appVariantContext.getProject().getLogger().info("applyConfigurationFile keep only :" + file);
-            applyLibConfigurationFile(file);
-            return;
-        }
-        appVariantContext.getProject().getLogger().info("applyConfigurationFile :" + file);
-        super.applyConfigurationFile(file);
+    public void visitLibraryClass(LibraryClass libraryClass) {
+
     }
 
-    public void applyLibConfigurationFile(@NonNull File file) throws IOException, ParseException {
-        KeepOnlyConfigurationParser parser =
-            new KeepOnlyConfigurationParser(file, System.getProperties());
-        try {
-            parser.parse(configuration);
-        } finally {
-            parser.close();
+    @Override
+    public void visitIntegerConstant(Clazz clazz, IntegerConstant integerConstant) {
+
+    }
+
+    @Override
+    public void visitLongConstant(Clazz clazz, LongConstant longConstant) {
+
+    }
+
+    @Override
+    public void visitFloatConstant(Clazz clazz, FloatConstant floatConstant) {
+
+    }
+
+    @Override
+    public void visitDoubleConstant(Clazz clazz, DoubleConstant doubleConstant) {
+
+    }
+
+    @Override
+    public void visitStringConstant(Clazz clazz, StringConstant stringConstant) {
+
+    }
+
+    @Override
+    public void visitUtf8Constant(Clazz clazz, Utf8Constant utf8Constant) {
+
+    }
+
+    @Override
+    public void visitInvokeDynamicConstant(Clazz clazz, InvokeDynamicConstant invokeDynamicConstant) {
+
+    }
+
+    @Override
+    public void visitMethodHandleConstant(Clazz clazz, MethodHandleConstant methodHandleConstant) {
+
+    }
+
+    @Override
+    public void visitFieldrefConstant(Clazz clazz, FieldrefConstant fieldrefConstant) {
+
+        String clazzName = clazz.getClassName(fieldrefConstant.u2classIndex);
+        if (mainDexClazzList.contains(clazzName)) {
+            RefClazz refClazz = getRefClazz(clazzName);
+            refClazz.getFields().add(clazz.getName(fieldrefConstant.u2nameAndTypeIndex));
         }
+
+        //System.out.println(" FieldRef [" +
+        //                       clazz.getClassName(fieldrefConstant.u2classIndex) + "." +
+        //                       clazz.getName(fieldrefConstant.u2nameAndTypeIndex) + " " +
+        //                       clazz.getType(fieldrefConstant.u2nameAndTypeIndex) + "]");
+    }
+
+    @Override
+    public void visitInterfaceMethodrefConstant(Clazz clazz, InterfaceMethodrefConstant interfaceMethodrefConstant) {
+
+    }
+
+    @Override
+    public void visitMethodrefConstant(Clazz clazz, MethodrefConstant methodrefConstant) {
+
+        String clazzName = clazz.getClassName(methodrefConstant.u2classIndex);
+
+        System.out.println(clazzName);
+
+        if (mainDexClazzList.contains(clazzName)) {
+            RefClazz refClazz = getRefClazz(clazzName);
+            refClazz.getMethods().add(clazz.getName(methodrefConstant.u2nameAndTypeIndex));
+        }
+
+    }
+
+    @NotNull
+    private RefClazz getRefClazz(String clazzName) {
+        RefClazz refClazz = refClazzMap.get(clazzName);
+        if (null == refClazz) {
+            refClazz = new RefClazz(clazzName);
+            refClazzMap.put(clazzName, refClazz);
+        }
+        return refClazz;
+    }
+
+    @Override
+    public void visitClassConstant(Clazz clazz, ClassConstant classConstant) {
+
+    }
+
+    @Override
+    public void visitMethodTypeConstant(Clazz clazz, MethodTypeConstant methodTypeConstant) {
+
+    }
+
+    @Override
+    public void visitNameAndTypeConstant(Clazz clazz, NameAndTypeConstant nameAndTypeConstant) {
+
+    }
+
+    public Map<String, RefClazz> getRefClazzMap() {
+        return refClazzMap;
+    }
+
+    public void setRefClazzMap(
+        Map<String, RefClazz> refClazzMap) {
+        this.refClazzMap = refClazzMap;
     }
 }

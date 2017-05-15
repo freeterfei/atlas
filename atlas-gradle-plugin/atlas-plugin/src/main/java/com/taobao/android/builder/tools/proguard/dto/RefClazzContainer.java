@@ -207,179 +207,76 @@
  *
  */
 
-package com.taobao.android.builder.tasks.transform;
+package com.taobao.android.builder.tools.proguard.dto;
 
-import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.function.Supplier;
-
-import com.android.annotations.NonNull;
-import com.android.build.api.transform.JarInput;
-import com.android.build.api.transform.TransformException;
-import com.android.build.api.transform.TransformInput;
-import com.android.build.api.transform.TransformInvocation;
-import com.android.build.gradle.internal.api.AppVariantContext;
-import com.android.build.gradle.internal.scope.VariantScope;
-import com.android.build.gradle.internal.transforms.BaseProguardAction;
-import com.android.build.gradle.internal.transforms.ProGuardTransform;
-import com.android.build.gradle.internal.transforms.ProguardConfigurable;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
-import com.taobao.android.builder.extension.TBuildConfig;
-import com.taobao.android.builder.tools.ReflectUtils;
-import com.taobao.android.builder.tools.proguard.AtlasProguardHelper;
-import com.taobao.android.builder.tools.proguard.KeepOnlyConfigurationParser;
-import org.gradle.api.GradleException;
-import proguard.Configuration;
-import proguard.ParseException;
+import java.util.Map;
 
 /**
- * Created by wuzhong on 2017/4/25.
+ * Created by wuzhong on 2017/5/14.
  */
-public class AtlasProguardTransform extends ProGuardTransform {
+public class RefClazzContainer {
 
-    public AppVariantContext appVariantContext;
-    public ProGuardTransform oldTransform;
+    private Map<String, RefClazz> refClazzMap = new HashMap<>();
 
-    private TBuildConfig buildConfig;
-
-    List<File> defaultProguardFiles = new ArrayList<>();
-
-    public AtlasProguardTransform(AppVariantContext appVariantContext, BaseVariantOutputData baseVariantOutputData) {
-        super(appVariantContext.getScope(), false);
-        this.appVariantContext = appVariantContext;
-        defaultProguardFiles.addAll(
-            appVariantContext.getVariantConfiguration().getProguardFiles(false, new ArrayList<>()));
-
-        this.buildConfig = appVariantContext.getAtlasExtension().getTBuildConfig();
+    public RefClazzContainer(
+        Map<String, RefClazz> refClazzMap) {
+        this.refClazzMap = refClazzMap;
     }
 
-    public AtlasProguardTransform(VariantScope variantScope, boolean asJar) {
-        super(variantScope, asJar);
+    public RefClazzContainer() {
     }
 
-    @Override
-    public void transform(TransformInvocation invocation) throws TransformException {
+    public void addRefClazz(Map<String, RefClazz> other) {
 
-        if (appVariantContext.getAtlasExtension().getTBuildConfig().isFastProguard()){
-            fastTransform(invocation);
-            return;
-        }
+        for (String key : other.keySet()) {
 
-        try {
-
-            List oldConfigList = (List)ReflectUtils.getField(ProguardConfigurable.class, oldTransform,
-                                                             "configurationFiles");
-
-            List configList = (List)ReflectUtils.getField(ProguardConfigurable.class, this, "configurationFiles");
-
-            configList.addAll(oldConfigList);
-
-            Configuration configuration = (Configuration)ReflectUtils.getField(BaseProguardAction.class,
-                                                                               oldTransform, "configuration");
-            if (null == this.configuration.keep) {
-                this.configuration.keep = new ArrayList();
+            RefClazz otherClazz = other.get(key);
+            RefClazz clazz = refClazzMap.get(key);
+            if (null == clazz) {
+                refClazzMap.put(key, otherClazz);
+            } else {
+                clazz.getFields().addAll(otherClazz.getFields());
+                clazz.getMethods().addAll(otherClazz.getMethods());
             }
-            if (null != configuration.keep) {
-                this.configuration.keep.addAll(configuration.keep);
-            }
-
-        } catch (Exception e) {
-            throw new GradleException(e.getMessage(), e);
         }
 
-        //apply bundle Inout
-        AtlasProguardHelper.applyBundleInOutConfigration(appVariantContext, this);
-
-        //apply bundle's configuration, 做开关控制
-        if (buildConfig.isBundleProguardConfigEnabled()) {
-            AtlasProguardHelper.applyBundleProguardConfigration(appVariantContext, this);
-        }
-
-        //apply mapping
-        AtlasProguardHelper.applyMapping(appVariantContext, this);
-
-        //set output
-        File proguardOutFile = new File(appVariantContext.getProject().getBuildDir(), "outputs/proguard.cfg");
-        this.printconfiguration(proguardOutFile);
-
-        super.transform(invocation);
     }
 
-    public void fastTransform(TransformInvocation invocation) throws TransformException {
+    public List<String> convertToKeeplines() {
 
-        try {
-
-            List<File> mainJars = new ArrayList<>();
-            for (TransformInput transformInput : invocation.getInputs()){
-                for (JarInput jarInput : transformInput.getJarInputs()){
-                    mainJars.add(jarInput.getFile());
-                }
+        List<RefClazz> refClazzes = new ArrayList<>(refClazzMap.values());
+        Collections.sort(refClazzes, new Comparator<RefClazz>() {
+            @Override
+            public int compare(RefClazz o1, RefClazz o2) {
+                return o1.getClazzName().compareTo(o2.getClazzName());
             }
-            //先做bundle的并发proguard，cache优先
-            AtlasProguardHelper.doBundleProguard(appVariantContext, mainJars);
+        });
 
-            //apply bundle Inout
-            AtlasProguardHelper.applyBundleKeepsV2(appVariantContext, this);
+        List<String> lines = new ArrayList<>();
+        for (RefClazz refClazz : refClazzes) {
+            lines.add("-keep class " + refClazz.getClazzName().replace("/", ".") + " {");
 
-            //apply mapping TODO ，不混淆，没有效果的
-            AtlasProguardHelper.applyMapping(appVariantContext, this);
+            List<String> methods = new ArrayList<>(refClazz.getMethods());
+            List<String> fields = new ArrayList<>(refClazz.getFields());
+            Collections.sort(methods);
+            Collections.sort(fields);
 
-            List oldConfigList = (List)ReflectUtils.getField(ProguardConfigurable.class, oldTransform,
-                                                             "configurationFiles");
-
-            List configList = (List)ReflectUtils.getField(ProguardConfigurable.class, this, "configurationFiles");
-
-            configList.addAll(oldConfigList);
-
-            Configuration configuration = (Configuration)ReflectUtils.getField(BaseProguardAction.class,
-                                                                               oldTransform, "configuration");
-            if (null == this.configuration.keep) {
-                this.configuration.keep = new ArrayList();
-            }
-            if (null != configuration.keep) {
-                this.configuration.keep.addAll(configuration.keep);
+            for (String name : methods) {
+                lines.add(" *** " + name + "(...);");
             }
 
-            //set output
-            File proguardOutFile = new File(appVariantContext.getProject().getBuildDir(), "outputs/proguard.cfg");
-            this.printconfiguration(proguardOutFile);
+            for (String name : fields) {
+                lines.add(" *** " + name + ";");
+            }
 
-            super.transform(invocation);
-
-        } catch (Exception e) {
-            throw new GradleException(e.getMessage(), e);
+            lines.add("}");
         }
+        return lines;
     }
 
-
-    //TODO include bundles's configuration
-    @Override
-    public void setConfigurationFiles(Supplier<Collection<File>> configFiles) {
-        super.setConfigurationFiles(configFiles);
-    }
-
-    @Override
-    public void applyConfigurationFile(File file) throws IOException, ParseException {
-        //appVariantContext.getVariantConfiguration().getProguardFiles(false, new ArrayList<>());
-        if (!defaultProguardFiles.contains(file) && buildConfig.isLibraryProguardKeepOnly()) {
-            appVariantContext.getProject().getLogger().info("applyConfigurationFile keep only :" + file);
-            applyLibConfigurationFile(file);
-            return;
-        }
-        appVariantContext.getProject().getLogger().info("applyConfigurationFile :" + file);
-        super.applyConfigurationFile(file);
-    }
-
-    public void applyLibConfigurationFile(@NonNull File file) throws IOException, ParseException {
-        KeepOnlyConfigurationParser parser =
-            new KeepOnlyConfigurationParser(file, System.getProperties());
-        try {
-            parser.parse(configuration);
-        } finally {
-            parser.close();
-        }
-    }
 }

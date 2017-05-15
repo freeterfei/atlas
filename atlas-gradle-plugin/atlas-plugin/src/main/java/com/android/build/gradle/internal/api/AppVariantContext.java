@@ -428,4 +428,9 @@ public class AppVariantContext<T extends BaseVariantImpl, Z extends BaseExtensio
         return new File(scope.getGlobalScope().getGeneratedDir(),
                         "source/atlascore/" + getVariantConfiguration().getDirName());
     }
+
+    public File getAwbProguardDir(AwbBundle awbBundle) {
+        return new File(scope.getGlobalScope().getIntermediatesDir(),
+                        "proguard-bundles/" + getVariantConfiguration().getDirName() + "/" + awbBundle.getName());
+    }
 }

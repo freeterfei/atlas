@@ -299,6 +299,10 @@ public class TBuildConfig {
 
     private boolean incremental = false;
 
+    private boolean fastProguard = false;
+
+    private int proguardParallelCount = 8;
+
     public Set<String> getRemoveSoFiles() {
         return removeSoFiles;
     }
@@ -493,5 +497,21 @@ public class TBuildConfig {
 
     public void setBundleProguardConfigBlackList(Set<String> bundleProguardConfigBlackList) {
         this.bundleProguardConfigBlackList = bundleProguardConfigBlackList;
+    }
+
+    public boolean isFastProguard() {
+        return fastProguard;
+    }
+
+    public void setFastProguard(boolean fastProguard) {
+        this.fastProguard = fastProguard;
+    }
+
+    public int getProguardParallelCount() {
+        return proguardParallelCount;
+    }
+
+    public void setProguardParallelCount(int proguardParallelCount) {
+        this.proguardParallelCount = proguardParallelCount;
     }
 }

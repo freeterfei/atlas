@@ -207,179 +207,95 @@
  *
  */
 
-package com.taobao.android.builder.tasks.transform;
+package com.taobao.android.builder.tools.proguard;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
-import java.util.function.Supplier;
+import java.util.Set;
 
-import com.android.annotations.NonNull;
-import com.android.build.api.transform.JarInput;
-import com.android.build.api.transform.TransformException;
-import com.android.build.api.transform.TransformInput;
-import com.android.build.api.transform.TransformInvocation;
-import com.android.build.gradle.internal.api.AppVariantContext;
-import com.android.build.gradle.internal.scope.VariantScope;
-import com.android.build.gradle.internal.transforms.BaseProguardAction;
-import com.android.build.gradle.internal.transforms.ProGuardTransform;
-import com.android.build.gradle.internal.transforms.ProguardConfigurable;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
-import com.taobao.android.builder.extension.TBuildConfig;
-import com.taobao.android.builder.tools.ReflectUtils;
-import com.taobao.android.builder.tools.proguard.AtlasProguardHelper;
-import com.taobao.android.builder.tools.proguard.KeepOnlyConfigurationParser;
-import org.gradle.api.GradleException;
-import proguard.Configuration;
-import proguard.ParseException;
+import com.android.build.gradle.internal.api.AppVariantOutputContext;
+import com.android.build.gradle.internal.api.AwbTransform;
+import com.google.common.collect.Lists;
+import org.apache.commons.io.FileUtils;
 
 /**
- * Created by wuzhong on 2017/4/25.
+ * 增加Awb的配置到混淆的配置中去
+ * Created by shenghua.nish on 2016-06-12 上午9:23.
  */
-public class AtlasProguardTransform extends ProGuardTransform {
+@Deprecated
+public class AwbProguardConfiguration {
 
-    public AppVariantContext appVariantContext;
-    public ProGuardTransform oldTransform;
+    public static final String INJARS_OPTION = "-injars";
 
-    private TBuildConfig buildConfig;
+    public static final String OUTJARS_OPTION = "-outjars";
 
-    List<File> defaultProguardFiles = new ArrayList<>();
+    public static final String OBUSCATED_JAR = "obfuscated.jar";
 
-    public AtlasProguardTransform(AppVariantContext appVariantContext, BaseVariantOutputData baseVariantOutputData) {
-        super(appVariantContext.getScope(), false);
-        this.appVariantContext = appVariantContext;
-        defaultProguardFiles.addAll(
-            appVariantContext.getVariantConfiguration().getProguardFiles(false, new ArrayList<>()));
+    private final Collection<AwbTransform> awbTransforms;
 
-        this.buildConfig = appVariantContext.getAtlasExtension().getTBuildConfig();
+    private final File awbObfuscatedDir;
+
+    private final AppVariantOutputContext appVariantOutputContext;
+
+    public AwbProguardConfiguration(Collection<AwbTransform> awbTransforms,
+                                    File awbObfuscatedDir,
+                                    AppVariantOutputContext appVariantOutputContext) {
+        this.awbTransforms = awbTransforms;
+        this.awbObfuscatedDir = awbObfuscatedDir;
+        this.appVariantOutputContext = appVariantOutputContext;
     }
 
-    public AtlasProguardTransform(VariantScope variantScope, boolean asJar) {
-        super(variantScope, asJar);
-    }
+    /**
+     * 打印proguard的config文件到指定文件
+     *
+     * @param outConfigFile
+     */
+    public void printConfigFile(File outConfigFile) throws IOException {
+        List<String> configs = Lists.newArrayList();
+        //awb对没个lib单独做proguard，方便predex
+        for (AwbTransform awbTransform : awbTransforms) {
 
-    @Override
-    public void transform(TransformInvocation invocation) throws TransformException {
+            List<File> inputLibraries = Lists.newArrayList();
 
-        if (appVariantContext.getAtlasExtension().getTBuildConfig().isFastProguard()){
-            fastTransform(invocation);
-            return;
-        }
+            String name = awbTransform.getAwbBundle().getName();
+            File obuscateDir = new File(awbObfuscatedDir, awbTransform.getAwbBundle().getName());
+            obuscateDir.mkdirs();
 
-        try {
-
-            List oldConfigList = (List)ReflectUtils.getField(ProguardConfigurable.class, oldTransform,
-                                                             "configurationFiles");
-
-            List configList = (List)ReflectUtils.getField(ProguardConfigurable.class, this, "configurationFiles");
-
-            configList.addAll(oldConfigList);
-
-            Configuration configuration = (Configuration)ReflectUtils.getField(BaseProguardAction.class,
-                                                                               oldTransform, "configuration");
-            if (null == this.configuration.keep) {
-                this.configuration.keep = new ArrayList();
+            //configs.add();
+            if (null != awbTransform.getInputDir() && awbTransform.getInputDir().exists()) {
+                configs.add(INJARS_OPTION + " " + awbTransform.getInputDir().getAbsolutePath());
+                File obsJar = new File(obuscateDir, "inputdir_" + OBUSCATED_JAR);
+                inputLibraries.add(obsJar);
+                configs.add(OUTJARS_OPTION + " " + obsJar.getAbsolutePath());
             }
-            if (null != configuration.keep) {
-                this.configuration.keep.addAll(configuration.keep);
-            }
 
-        } catch (Exception e) {
-            throw new GradleException(e.getMessage(), e);
-        }
+            Set<String> classNames = new HashSet<>();
+            for (File inputLibrary : awbTransform.getInputLibraries()) {
+                configs.add(INJARS_OPTION + " " + inputLibrary.getAbsolutePath());
 
-        //apply bundle Inout
-        AtlasProguardHelper.applyBundleInOutConfigration(appVariantContext, this);
+                String fileName = inputLibrary.getName();
 
-        //apply bundle's configuration, 做开关控制
-        if (buildConfig.isBundleProguardConfigEnabled()) {
-            AtlasProguardHelper.applyBundleProguardConfigration(appVariantContext, this);
-        }
-
-        //apply mapping
-        AtlasProguardHelper.applyMapping(appVariantContext, this);
-
-        //set output
-        File proguardOutFile = new File(appVariantContext.getProject().getBuildDir(), "outputs/proguard.cfg");
-        this.printconfiguration(proguardOutFile);
-
-        super.transform(invocation);
-    }
-
-    public void fastTransform(TransformInvocation invocation) throws TransformException {
-
-        try {
-
-            List<File> mainJars = new ArrayList<>();
-            for (TransformInput transformInput : invocation.getInputs()){
-                for (JarInput jarInput : transformInput.getJarInputs()){
-                    mainJars.add(jarInput.getFile());
+                if (classNames.contains(fileName)) {
+                    fileName = "a" + classNames.size() + "_" + fileName;
                 }
+
+                classNames.add(fileName);
+
+                File obsJar = new File(obuscateDir, fileName);
+
+                inputLibraries.add(obsJar);
+                configs.add(OUTJARS_OPTION + " " + obsJar.getAbsolutePath());
             }
-            //先做bundle的并发proguard，cache优先
-            AtlasProguardHelper.doBundleProguard(appVariantContext, mainJars);
+            //            configs.add();
 
-            //apply bundle Inout
-            AtlasProguardHelper.applyBundleKeepsV2(appVariantContext, this);
-
-            //apply mapping TODO ，不混淆，没有效果的
-            AtlasProguardHelper.applyMapping(appVariantContext, this);
-
-            List oldConfigList = (List)ReflectUtils.getField(ProguardConfigurable.class, oldTransform,
-                                                             "configurationFiles");
-
-            List configList = (List)ReflectUtils.getField(ProguardConfigurable.class, this, "configurationFiles");
-
-            configList.addAll(oldConfigList);
-
-            Configuration configuration = (Configuration)ReflectUtils.getField(BaseProguardAction.class,
-                                                                               oldTransform, "configuration");
-            if (null == this.configuration.keep) {
-                this.configuration.keep = new ArrayList();
-            }
-            if (null != configuration.keep) {
-                this.configuration.keep.addAll(configuration.keep);
-            }
-
-            //set output
-            File proguardOutFile = new File(appVariantContext.getProject().getBuildDir(), "outputs/proguard.cfg");
-            this.printconfiguration(proguardOutFile);
-
-            super.transform(invocation);
-
-        } catch (Exception e) {
-            throw new GradleException(e.getMessage(), e);
+            awbTransform.setInputFiles(inputLibraries);
+            awbTransform.setInputDir(null);
+            awbTransform.getInputLibraries().clear();
+            appVariantOutputContext.getAwbTransformMap().put(name, awbTransform);
         }
-    }
-
-
-    //TODO include bundles's configuration
-    @Override
-    public void setConfigurationFiles(Supplier<Collection<File>> configFiles) {
-        super.setConfigurationFiles(configFiles);
-    }
-
-    @Override
-    public void applyConfigurationFile(File file) throws IOException, ParseException {
-        //appVariantContext.getVariantConfiguration().getProguardFiles(false, new ArrayList<>());
-        if (!defaultProguardFiles.contains(file) && buildConfig.isLibraryProguardKeepOnly()) {
-            appVariantContext.getProject().getLogger().info("applyConfigurationFile keep only :" + file);
-            applyLibConfigurationFile(file);
-            return;
-        }
-        appVariantContext.getProject().getLogger().info("applyConfigurationFile :" + file);
-        super.applyConfigurationFile(file);
-    }
-
-    public void applyLibConfigurationFile(@NonNull File file) throws IOException, ParseException {
-        KeepOnlyConfigurationParser parser =
-            new KeepOnlyConfigurationParser(file, System.getProperties());
-        try {
-            parser.parse(configuration);
-        } finally {
-            parser.close();
-        }
+        FileUtils.writeLines(outConfigFile, configs);
     }
 }
