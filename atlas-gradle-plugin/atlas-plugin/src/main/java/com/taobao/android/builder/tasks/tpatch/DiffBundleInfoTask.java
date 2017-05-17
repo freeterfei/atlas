@@ -467,7 +467,7 @@ public class DiffBundleInfoTask extends BaseTask {
          */
         @Override
         public String getName() {
-            return scope.getTaskName("DiffBundleInfo");
+            return scope.getTaskName("diffBundleInfo");
         }
 
         /**

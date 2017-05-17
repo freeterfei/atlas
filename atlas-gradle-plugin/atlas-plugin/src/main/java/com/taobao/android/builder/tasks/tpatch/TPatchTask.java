@@ -427,7 +427,7 @@ public class TPatchTask extends BaseTask {
 
         @Override
         public String getName() {
-            return scope.getTaskName("Create", "TPatch");
+            return scope.getTaskName("createTPatch");
         }
 
         @Override
