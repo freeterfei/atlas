@@ -207,85 +207,23 @@
  *
  */
 
-package com.taobao.android.builder.extension;
+package com.taobao.android.builder.tools.multidex;
 
-import java.util.Set;
-
-import com.google.common.collect.Sets;
-import com.taobao.android.builder.extension.annotation.Config;
+import java.io.File;
+import java.util.Comparator;
 
 /**
- * Created by wuzhong on 2017/5/8.
+ * Created by wuzhong on 2017/5/31.
  */
-public class MultiDexConfig {
+public class FileComparator implements Comparator<File> {
 
-    private String name;
-
-    public MultiDexConfig(String name) {
-        this.name = name;
-    }
-
-    @Config(title = "是否启用快速", message = "是否启用atlas , true/false", order = 0, group = "atlas")
-    private boolean fastMultiDex = false;
-
-    /**
-     * dex 的分包个数， 0 表示不进行限制，不做2次merge
-     */
-    @Config(title = "dex的个数", message = "0表示无限制", order = 1, group = "atlas")
-    private int dexCount;
-
-    @Config(title = "dex分隔的规则", message = "a,b;c,d", order = 2, group = "atlas")
-    private String dexSplitRules;
-
-    private Set<String> mainDexWhiteList = Sets.newHashSet();
-
-    private Set<String> mainDexBlackList = Sets.newHashSet();
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public boolean isFastMultiDex() {
-        return fastMultiDex;
-    }
-
-    public void setFastMultiDex(boolean fastMultiDex) {
-        this.fastMultiDex = fastMultiDex;
-    }
-
-    public Set<String> getMainDexWhiteList() {
-        return mainDexWhiteList;
-    }
-
-    public void setMainDexWhiteList(Set<String> mainDexWhiteList) {
-        this.mainDexWhiteList = mainDexWhiteList;
-    }
-
-    public Set<String> getMainDexBlackList() {
-        return mainDexBlackList;
-    }
-
-    public void setMainDexBlackList(Set<String> mainDexBlackList) {
-        this.mainDexBlackList = mainDexBlackList;
-    }
-
-    public int getDexCount() {
-        return dexCount;
-    }
-
-    public void setDexCount(int dexCount) {
-        this.dexCount = dexCount;
-    }
-
-    public String getDexSplitRules() {
-        return dexSplitRules;
-    }
-
-    public void setDexSplitRules(String dexSplitRules) {
-        this.dexSplitRules = dexSplitRules;
+    @Override
+    public int compare(File o1, File o2) {
+        if (o1.getAbsolutePath().contains("fastmaindex")) {
+            return 1;
+        } else if (o2.getAbsolutePath().contains("fastmaindex")) {
+            return -1;
+        }
+        return (int)(o2.length() - o1.length());
     }
 }
